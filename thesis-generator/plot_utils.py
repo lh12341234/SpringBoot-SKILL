@@ -37,23 +37,23 @@ def _write_drawio(filename, page_name, cells, page_width=1169, page_height=827):
 
 def create_usecase_drawio(filename, actor_name, use_cases):
     height = max(500, len(use_cases) * 100 + 100)
-    actor_x, actor_y, actor_w, actor_h = 95, height // 2 - 55, 70, 120
+    actor_x, actor_y, actor_w, actor_h = 90, height // 2 - 28, 120, 56
     uc_x, uc_w, uc_h = 400, 180, 70
     start_y = (height - len(use_cases) * 100) // 2
 
     cells = []
     cells.append(
-        f'<mxCell id="actor1" value="{_mx_escape(actor_name)}" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;strokeColor=#2D4B7A;" vertex="1" parent="1"><mxGeometry x="{actor_x}" y="{actor_y}" width="{actor_w}" height="{actor_h}" as="geometry"/></mxCell>'
+        f'<mxCell id="actor1" value="{_mx_escape(actor_name)}" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#444444;fillColor=#FFFFFF;align=center;verticalAlign=middle;fontSize=20;fontColor=#111111;fontFamily=Microsoft YaHei;" vertex="1" parent="1"><mxGeometry x="{actor_x}" y="{actor_y}" width="{actor_w}" height="{actor_h}" as="geometry"/></mxCell>'
     )
 
     for i, case in enumerate(use_cases):
         uc_id = f"uc{i+1}"
         y = start_y + i * 100
         cells.append(
-            f'<mxCell id="{uc_id}" value="{_mx_escape(case)}" style="ellipse;whiteSpace=wrap;html=1;strokeColor=#2D4B7A;fillColor=#E6F0FF;" vertex="1" parent="1"><mxGeometry x="{uc_x}" y="{y}" width="{uc_w}" height="{uc_h}" as="geometry"/></mxCell>'
+            f'<mxCell id="{uc_id}" value="{_mx_escape(case)}" style="ellipse;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#444444;fillColor=#FFFFFF;align=center;verticalAlign=middle;fontSize=20;fontColor=#111111;fontFamily=Microsoft YaHei;" vertex="1" parent="1"><mxGeometry x="{uc_x}" y="{y}" width="{uc_w}" height="{uc_h}" as="geometry"/></mxCell>'
         )
         cells.append(
-            f'<mxCell id="e_uc_{i+1}" value="" style="endArrow=none;html=1;strokeColor=#000000;" edge="1" parent="1" source="actor1" target="{uc_id}"><mxGeometry relative="1" as="geometry"/></mxCell>'
+            f'<mxCell id="e_uc_{i+1}" value="" style="endArrow=none;html=1;strokeWidth=2;strokeColor=#444444;" edge="1" parent="1" source="actor1" target="{uc_id}"><mxGeometry relative="1" as="geometry"/></mxCell>'
         )
 
     _write_drawio(filename, "UseCase", cells, page_width=1400, page_height=max(900, height + 120))
@@ -254,12 +254,17 @@ class ThesisDiagramPlotter:
         self.width = width * scale
         self.height = height * scale
         self.colors = {
-            'bg': '#FFFFFF', 'line': '#2D4B7A', 'fill_uc': '#E6F0FF', 
-            'fill_actor': '#4A7EBB', 'text': '#333333', 'fill_flow': '#FFF2CC'
+            'bg': '#FFFFFF',
+            'line': '#444444',
+            'fill_uc': '#FFFFFF',
+            'fill_actor': '#FFFFFF',
+            'text': '#111111',
+            'fill_flow': '#FFFFFF',
         }
         self.img = Image.new('RGB', (self.width, self.height), self.colors['bg'])
         self.draw = ImageDraw.Draw(self.img)
         self.font = self._load_font(14 * scale)
+        self._font_cache = {}
 
     def _load_font(self, size):
         font_names = ["msyh.ttc", "msyh.ttf", "simsun.ttc", "Arial Unicode.ttf"]
@@ -273,25 +278,101 @@ class ThesisDiagramPlotter:
         try: return ImageFont.truetype("msyh.ttc", int(size))
         except: return ImageFont.load_default()
 
+    def _get_font(self, size):
+        size = max(8, int(size))
+        if size not in self._font_cache:
+            self._font_cache[size] = self._load_font(size)
+        return self._font_cache[size]
+
+    def _fit_text(self, text, max_w, max_h, preferred_size=None, min_size=None):
+        text = str(text).strip()
+        if preferred_size is None:
+            preferred_size = 18 * self.scale
+        if min_size is None:
+            min_size = 10 * self.scale
+
+        max_w = max(20, int(max_w))
+        max_h = max(20, int(max_h))
+
+        def wrap_lines(font_obj):
+            lines = []
+            for raw_line in text.splitlines() or [""]:
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    lines.append("")
+                    continue
+                current = ""
+                for ch in raw_line:
+                    candidate = current + ch
+                    bbox = self.draw.textbbox((0, 0), candidate, font=font_obj)
+                    if (bbox[2] - bbox[0]) <= max_w:
+                        current = candidate
+                    else:
+                        if current:
+                            lines.append(current)
+                        current = ch
+                if current:
+                    lines.append(current)
+            return lines or [text]
+
+        for size in range(int(preferred_size), int(min_size) - 1, -1):
+            font_obj = self._get_font(size)
+            lines = wrap_lines(font_obj)
+            sample = self.draw.textbbox((0, 0), "Ag", font=font_obj)
+            line_h = sample[3] - sample[1]
+            gap = max(2, int(size * 0.2))
+            total_h = len(lines) * line_h + max(0, len(lines) - 1) * gap
+            max_line_w = 0
+            for line in lines:
+                bbox = self.draw.textbbox((0, 0), line, font=font_obj)
+                max_line_w = max(max_line_w, bbox[2] - bbox[0])
+            if total_h <= max_h and max_line_w <= max_w:
+                return font_obj, lines, line_h, gap
+
+        font_obj = self._get_font(min_size)
+        lines = wrap_lines(font_obj)
+        sample = self.draw.textbbox((0, 0), "Ag", font=font_obj)
+        line_h = sample[3] - sample[1]
+        gap = max(2, int(min_size * 0.2))
+        return font_obj, lines, line_h, gap
+
+    def draw_text_in_box(self, x1, y1, x2, y2, text, preferred_size=None, min_size=None, fill=None):
+        x1 = int(x1)
+        y1 = int(y1)
+        x2 = int(x2)
+        y2 = int(y2)
+        if not str(text).strip():
+            return
+
+        font_obj, lines, line_h, gap = self._fit_text(
+            text,
+            max_w=(x2 - x1) - 12 * self.scale,
+            max_h=(y2 - y1) - 12 * self.scale,
+            preferred_size=preferred_size,
+            min_size=min_size,
+        )
+        total_h = len(lines) * line_h + max(0, len(lines) - 1) * gap
+        start_y = y1 + (y2 - y1 - total_h) / 2
+
+        for idx, line in enumerate(lines):
+            bbox = self.draw.textbbox((0, 0), line, font=font_obj)
+            text_w = bbox[2] - bbox[0]
+            tx = x1 + (x2 - x1 - text_w) / 2
+            ty = start_y + idx * (line_h + gap)
+            self.draw.text((tx, ty), line, fill=fill or self.colors['text'], font=font_obj)
+
     def draw_actor(self, x, y, name):
         x, y = x * self.scale, y * self.scale
-        w, h = 40 * self.scale, 40 * self.scale
-        head_r = w // 3
-        self.draw.ellipse([x + w//2 - head_r, y, x + w//2 + head_r, y + head_r*2], fill=self.colors['fill_actor'])
-        self.draw.chord([x, y + head_r*2.2, x + w, y + h*1.2], 180, 0, fill=self.colors['fill_actor'])
-        text_bbox = self.draw.textbbox((0, 0), name, font=self.font)
-        text_w = text_bbox[2] - text_bbox[0]
-        self.draw.text((x + w//2 - text_w//2, y + h + 10*self.scale), name, fill=self.colors['text'], font=self.font)
-        return (x + w//2, y + h//2)
+        w, h = 110 * self.scale, 56 * self.scale
+        self.draw.rectangle([x, y, x + w, y + h], fill=self.colors['fill_actor'], outline=self.colors['line'], width=2 * self.scale)
+        self.draw_text_in_box(x, y, x + w, y + h, name, preferred_size=18 * self.scale, min_size=12 * self.scale)
+        return (x + w, y + h//2)
 
     def draw_use_case(self, x, y, text):
         x, y = x * self.scale, y * self.scale
         w, h = 180 * self.scale, 70 * self.scale
-        self.draw.ellipse([x+4*self.scale, y+4*self.scale, x+w+4*self.scale, y+h+4*self.scale], fill='#E0E0E0')
         self.draw.ellipse([x, y, x+w, y+h], fill=self.colors['fill_uc'], outline=self.colors['line'], width=2*self.scale)
-        text_bbox = self.draw.textbbox((0, 0), text, font=self.font)
-        text_w = text_bbox[2] - text_bbox[0]
-        self.draw.text((x + (w-text_w)/2, y + (h-(text_bbox[3]-text_bbox[1]))/2), text, fill=self.colors['text'], font=self.font)
+        self.draw_text_in_box(x, y, x + w, y + h, text, preferred_size=18 * self.scale, min_size=11 * self.scale)
         return (x, y + h//2)
 
     def draw_connection(self, start, end):
@@ -301,8 +382,7 @@ class ThesisDiagramPlotter:
         x, y, w, h = x*self.scale, y*self.scale, w*self.scale, h*self.scale
         self.draw.rectangle([x, y, x+w, y+h], fill=fill, outline=self.colors['line'], width=2*self.scale)
         if text:
-            tb = self.draw.textbbox((0, 0), text, font=self.font)
-            self.draw.text((x + (w-(tb[2]-tb[0]))/2, y + (h-(tb[3]-tb[1]))/2), text, fill='black', font=self.font)
+            self.draw_text_in_box(x, y, x + w, y + h, text, preferred_size=18 * self.scale, min_size=10 * self.scale, fill='black')
         return (x + w/2, y + h) # Return bottom center
 
     def draw_diamond(self, x, y, w, h, text):
@@ -311,8 +391,16 @@ class ThesisDiagramPlotter:
         pts = [(x+w/2, y), (x+w, y+h/2), (x+w/2, y+h), (x, y+h/2)]
         self.draw.polygon(pts, fill=self.colors['fill_flow'], outline=self.colors['line'], width=2*self.scale)
         if text:
-            tb = self.draw.textbbox((0, 0), text, font=self.font)
-            self.draw.text((x + (w-(tb[2]-tb[0]))/2, y + (h-(tb[3]-tb[1]))/2), text, fill='black', font=self.font)
+            self.draw_text_in_box(
+                x + 16 * self.scale,
+                y + 12 * self.scale,
+                x + w - 16 * self.scale,
+                y + h - 12 * self.scale,
+                text,
+                preferred_size=18 * self.scale,
+                min_size=10 * self.scale,
+                fill='black',
+            )
         return (x + w/2, y + h)
 
     def draw_arrow(self, start, end):
@@ -859,3 +947,427 @@ def create_er_diagram_drawio(filename):
 
     with open(drawio_path, "w", encoding="utf-8") as f:
         f.write(xml)
+
+
+def _wrap_text_lines(draw, text, font_obj, max_width):
+    text = str(text or "").strip()
+    if not text:
+        return []
+    max_width = max(20, int(max_width))
+    lines = []
+    for raw_line in text.splitlines() or [""]:
+        raw_line = raw_line.strip()
+        if not raw_line:
+            lines.append("")
+            continue
+        current = ""
+        for ch in raw_line:
+            candidate = current + ch
+            bbox = draw.textbbox((0, 0), candidate, font=font_obj)
+            if (bbox[2] - bbox[0]) <= max_width:
+                current = candidate
+            else:
+                if current:
+                    lines.append(current)
+                current = ch
+        if current:
+            lines.append(current)
+    return lines
+
+
+def _line_metrics(draw, font_obj):
+    bbox = draw.textbbox((0, 0), "Ag", font=font_obj)
+    return bbox[3] - bbox[1]
+
+
+def _fit_lines_in_box(draw, lines, load_font, max_w, max_h, preferred_size, min_size):
+    lines = [str(line).strip() for line in (lines or [])]
+    if not lines:
+        return load_font(min_size), [], _line_metrics(draw, load_font(min_size)), max(2, int(min_size * 0.2))
+
+    for size in range(int(preferred_size), int(min_size) - 1, -1):
+        font_obj = load_font(size)
+        wrapped = []
+        for line in lines:
+            wrapped.extend(_wrap_text_lines(draw, line, font_obj, max_w) or [""])
+        line_h = _line_metrics(draw, font_obj)
+        gap = max(2, int(size * 0.2))
+        total_h = len(wrapped) * line_h + max(0, len(wrapped) - 1) * gap
+        widest = 0
+        for line in wrapped:
+            bbox = draw.textbbox((0, 0), line, font=font_obj)
+            widest = max(widest, bbox[2] - bbox[0])
+        if widest <= max_w and total_h <= max_h:
+            return font_obj, wrapped, line_h, gap
+
+    font_obj = load_font(min_size)
+    wrapped = []
+    for line in lines:
+        wrapped.extend(_wrap_text_lines(draw, line, font_obj, max_w) or [""])
+    return font_obj, wrapped, _line_metrics(draw, font_obj), max(2, int(min_size * 0.2))
+
+
+def create_class_diagram(filename, classes, relations=None, width=1600, height=1000):
+    """生成黑白论文风格类图（PNG + .drawio）。"""
+    relations = relations or []
+    plotter = ThesisDiagramPlotter(width=width, height=height, scale=2)
+    draw = plotter.draw
+    s = plotter.scale
+    line_color = "#444444"
+    text_color = "#111111"
+
+    normalized = []
+    cols = 2 if len(classes) > 1 else 1
+    box_w = 420
+    box_h = 220
+    margin_x = 70
+    gap_x = 70
+    gap_y = 90
+    top_y = 20
+
+    for idx, cls in enumerate(classes):
+        item = dict(cls)
+        if "x" not in item or "y" not in item:
+            row = idx // cols
+            col = idx % cols
+            item["x"] = margin_x + col * (box_w + gap_x)
+            item["y"] = top_y + row * (box_h + gap_y)
+        item.setdefault("w", box_w)
+        item.setdefault("h", box_h)
+        item.setdefault("attributes", [])
+        item.setdefault("methods", [])
+        item.setdefault("id", f"class_{idx + 1}")
+        normalized.append(item)
+
+    def draw_class_box(item):
+        x = item["x"] * s
+        y = item["y"] * s
+        w = item["w"] * s
+        h = item["h"] * s
+        title_h = max(42 * s, int(h * 0.18))
+        body_h = h - title_h
+        attr_h = body_h / 2
+        method_h = body_h - attr_h
+
+        draw.rounded_rectangle([x, y, x + w, y + h], radius=18 * s, fill="#FFFFFF", outline=line_color, width=2 * s)
+        draw.line([x, y + title_h, x + w, y + title_h], fill=line_color, width=2 * s)
+        draw.line([x, y + title_h + attr_h, x + w, y + title_h + attr_h], fill=line_color, width=2 * s)
+
+        title_font, title_lines, title_line_h, title_gap = _fit_lines_in_box(
+            draw, [item["name"]], plotter._get_font, w - 28 * s, title_h - 16 * s, 22 * s, 14 * s
+        )
+        title_total_h = len(title_lines) * title_line_h + max(0, len(title_lines) - 1) * title_gap
+        title_start_y = y + (title_h - title_total_h) / 2
+        for i, line in enumerate(title_lines):
+            bbox = draw.textbbox((0, 0), line, font=title_font)
+            draw.text((x + (w - (bbox[2] - bbox[0])) / 2, title_start_y + i * (title_line_h + title_gap)), line, fill=text_color, font=title_font)
+
+        for section_lines, sec_y, sec_h in (
+            (item["attributes"], y + title_h, attr_h),
+            (item["methods"], y + title_h + attr_h, method_h),
+        ):
+            font_obj, wrapped, line_h, gap = _fit_lines_in_box(
+                draw, section_lines or [" "], plotter._get_font, w - 36 * s, sec_h - 20 * s, 18 * s, 10 * s
+            )
+            total_h = len(wrapped) * line_h + max(0, len(wrapped) - 1) * gap
+            start_y = sec_y + (sec_h - total_h) / 2
+            for i, line in enumerate(wrapped):
+                bbox = draw.textbbox((0, 0), line, font=font_obj)
+                draw.text((x + (w - (bbox[2] - bbox[0])) / 2, start_y + i * (line_h + gap)), line, fill=text_color, font=font_obj)
+
+        return {
+            "id": item["id"],
+            "left": (item["x"], item["y"] + item["h"] / 2),
+            "right": (item["x"] + item["w"], item["y"] + item["h"] / 2),
+            "top": (item["x"] + item["w"] / 2, item["y"]),
+            "bottom": (item["x"] + item["w"] / 2, item["y"] + item["h"]),
+        }
+
+    anchors = {}
+    for item in normalized:
+        anchors[item["id"]] = draw_class_box(item)
+
+    for rel in relations:
+        src = anchors.get(rel.get("source"))
+        dst = anchors.get(rel.get("target"))
+        if not src or not dst:
+            continue
+
+        if abs(src["right"][0] - dst["left"][0]) <= abs(src["bottom"][1] - dst["top"][1]):
+            start = src["right"] if src["right"][0] <= dst["left"][0] else src["left"]
+            end = dst["left"] if src["right"][0] <= dst["left"][0] else dst["right"]
+        else:
+            start = src["bottom"] if src["bottom"][1] <= dst["top"][1] else src["top"]
+            end = dst["top"] if src["bottom"][1] <= dst["top"][1] else dst["bottom"]
+
+        draw.line([start[0] * s, start[1] * s, end[0] * s, end[1] * s], fill=line_color, width=2 * s)
+
+    plotter.save(filename)
+
+    cells = []
+    for item in normalized:
+        x = item["x"]
+        y = item["y"]
+        w = item["w"]
+        h = item["h"]
+        title_h = max(42, int(h * 0.18))
+        body_h = h - title_h
+        attr_h = int(body_h / 2)
+        method_h = h - title_h - attr_h
+        cell_id = item["id"]
+        cells.append(
+            f'<mxCell id="{cell_id}" value="" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#444444;fillColor=#FFFFFF;" vertex="1" parent="1"><mxGeometry x="{x}" y="{y}" width="{w}" height="{h}" as="geometry"/></mxCell>'
+        )
+        cells.append(
+            f'<mxCell id="{cell_id}_title" value="{_mx_escape(item["name"])}" style="text;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=20;fontStyle=1;fontColor=#111111;fontFamily=Microsoft YaHei;" vertex="1" parent="{cell_id}"><mxGeometry x="0" y="0" width="{w}" height="{title_h}" as="geometry"/></mxCell>'
+        )
+        cells.append(
+            f'<mxCell id="{cell_id}_sep1" value="" style="endArrow=none;html=1;strokeWidth=2;strokeColor=#444444;" edge="1" parent="{cell_id}"><mxGeometry relative="1" as="geometry"><mxPoint x="0" y="{title_h}" as="sourcePoint"/><mxPoint x="{w}" y="{title_h}" as="targetPoint"/></mxGeometry></mxCell>'
+        )
+        cells.append(
+            f'<mxCell id="{cell_id}_attr" value="{_mx_escape("<br/>".join(item["attributes"]))}" style="text;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=16;fontColor=#111111;fontFamily=Microsoft YaHei;" vertex="1" parent="{cell_id}"><mxGeometry x="8" y="{title_h}" width="{w - 16}" height="{attr_h}" as="geometry"/></mxCell>'
+        )
+        cells.append(
+            f'<mxCell id="{cell_id}_sep2" value="" style="endArrow=none;html=1;strokeWidth=2;strokeColor=#444444;" edge="1" parent="{cell_id}"><mxGeometry relative="1" as="geometry"><mxPoint x="0" y="{title_h + attr_h}" as="sourcePoint"/><mxPoint x="{w}" y="{title_h + attr_h}" as="targetPoint"/></mxGeometry></mxCell>'
+        )
+        cells.append(
+            f'<mxCell id="{cell_id}_method" value="{_mx_escape("<br/>".join(item["methods"]))}" style="text;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=16;fontColor=#111111;fontFamily=Microsoft YaHei;" vertex="1" parent="{cell_id}"><mxGeometry x="8" y="{title_h + attr_h}" width="{w - 16}" height="{method_h}" as="geometry"/></mxCell>'
+        )
+
+    for idx, rel in enumerate(relations, start=1):
+        src = rel.get("source")
+        dst = rel.get("target")
+        if not src or not dst:
+            continue
+        cells.append(
+            f'<mxCell id="rel_{idx}" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#444444;endArrow=block;endFill=1;" edge="1" parent="1" source="{src}" target="{dst}"><mxGeometry relative="1" as="geometry"/></mxCell>'
+        )
+
+    _write_drawio(filename, "ClassDiagram", cells, page_width=max(1600, width), page_height=max(1000, height))
+
+
+def create_entity_attribute_diagram(filename, entity_name, attributes, width=1600, height=1000):
+    """生成黑白论文风格实体属性图（PNG + .drawio）。"""
+    plotter = ThesisDiagramPlotter(width=width, height=height, scale=2)
+    draw = plotter.draw
+    s = plotter.scale
+    line_color = "#444444"
+    text_color = "#111111"
+
+    cx = width / 2
+    cy = max(220, height * 0.35)
+    entity_w = 300
+    entity_h = 90
+    attr_w = 220
+    attr_h = 70
+    radius_x = min(width * 0.33, 520)
+    radius_y = min(height * 0.27, 300)
+
+    ex1 = (cx - entity_w / 2) * s
+    ey1 = (cy - entity_h / 2) * s
+    ex2 = (cx + entity_w / 2) * s
+    ey2 = (cy + entity_h / 2) * s
+    draw.rounded_rectangle([ex1, ey1, ex2, ey2], radius=18 * s, fill="#FFFFFF", outline=line_color, width=2 * s)
+    plotter.draw_text_in_box(ex1, ey1, ex2, ey2, entity_name, preferred_size=24 * s, min_size=14 * s, fill=text_color)
+
+    placed = []
+    count = max(1, len(attributes))
+    angle_offset = -math.pi / 2
+    angles = [angle_offset + (2 * math.pi * i / count) for i in range(count)]
+
+    for idx, attr in enumerate(attributes):
+        angle = angles[idx]
+        ax = cx + math.cos(angle) * radius_x
+        ay = cy + math.sin(angle) * radius_y
+        x1 = (ax - attr_w / 2) * s
+        y1 = (ay - attr_h / 2) * s
+        x2 = (ax + attr_w / 2) * s
+        y2 = (ay + attr_h / 2) * s
+        draw.ellipse([x1, y1, x2, y2], fill="#FFFFFF", outline=line_color, width=2 * s)
+        plotter.draw_text_in_box(x1, y1, x2, y2, attr, preferred_size=22 * s, min_size=12 * s, fill=text_color)
+
+        dx = ax - cx
+        dy = ay - cy
+        dist = math.hypot(dx, dy) or 1
+        entity_edge = (cx + dx / dist * (entity_w / 2), cy + dy / dist * (entity_h / 2))
+        attr_edge = (ax - dx / dist * (attr_w / 2), ay - dy / dist * (attr_h / 2))
+        draw.line([entity_edge[0] * s, entity_edge[1] * s, attr_edge[0] * s, attr_edge[1] * s], fill=line_color, width=2 * s)
+        placed.append({"id": f"attr_{idx + 1}", "text": attr, "x": ax - attr_w / 2, "y": ay - attr_h / 2, "w": attr_w, "h": attr_h})
+
+    plotter.save(filename)
+
+    cells = [
+        f'<mxCell id="entity" value="{_mx_escape(entity_name)}" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#444444;fillColor=#FFFFFF;align=center;verticalAlign=middle;fontSize=24;fontColor=#111111;fontFamily=Microsoft YaHei;" vertex="1" parent="1"><mxGeometry x="{int(cx - entity_w / 2)}" y="{int(cy - entity_h / 2)}" width="{entity_w}" height="{entity_h}" as="geometry"/></mxCell>'
+    ]
+
+    for item in placed:
+        cells.append(
+            f'<mxCell id="{item["id"]}" value="{_mx_escape(item["text"])}" style="ellipse;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#444444;fillColor=#FFFFFF;align=center;verticalAlign=middle;fontSize=22;fontColor=#111111;fontFamily=Microsoft YaHei;" vertex="1" parent="1"><mxGeometry x="{int(item["x"])}" y="{int(item["y"])}" width="{item["w"]}" height="{item["h"]}" as="geometry"/></mxCell>'
+        )
+        cells.append(
+            f'<mxCell id="{item["id"]}_edge" value="" style="endArrow=none;html=1;strokeWidth=2;strokeColor=#444444;" edge="1" parent="1" source="entity" target="{item["id"]}"><mxGeometry relative="1" as="geometry"/></mxCell>'
+        )
+
+    _write_drawio(filename, "EntityAttribute", cells, page_width=max(1600, width), page_height=max(1000, height))
+
+
+def create_sequence_diagram(filename, participants, messages, width=1600, height=900):
+    """生成黑白论文风格时序图（PNG + .drawio）。"""
+    plotter = ThesisDiagramPlotter(width=width, height=height, scale=2)
+    draw = plotter.draw
+    s = plotter.scale
+    line_color = "#444444"
+    text_color = "#111111"
+
+    participants = [dict(p) if isinstance(p, dict) else {"name": str(p)} for p in participants]
+    messages = [dict(m) for m in messages]
+
+    count = max(1, len(participants))
+    top_margin = 60
+    header_w = 180
+    header_h = 60
+    bottom_margin = 70
+    left_margin = 90
+    right_margin = 90
+    spacing = (width - left_margin - right_margin - header_w) / max(1, count - 1) if count > 1 else 0
+    line_top = top_margin + header_h + 40
+    line_bottom = max(line_top + 260, height - bottom_margin)
+
+    participant_map = {}
+    for idx, participant in enumerate(participants):
+        px = left_margin + idx * spacing if count > 1 else width / 2 - header_w / 2
+        participant.setdefault("id", f"p{idx + 1}")
+        participant["x"] = px
+        participant["center_x"] = px + header_w / 2
+        participant_map[participant["id"]] = participant
+
+        x1 = px * s
+        y1 = top_margin * s
+        x2 = (px + header_w) * s
+        y2 = (top_margin + header_h) * s
+        draw.rectangle([x1, y1, x2, y2], fill="#FFFFFF", outline=line_color, width=2 * s)
+        plotter.draw_text_in_box(x1, y1, x2, y2, participant["name"], preferred_size=20 * s, min_size=12 * s, fill=text_color)
+        draw.line([participant["center_x"] * s, line_top * s, participant["center_x"] * s, line_bottom * s], fill=line_color, width=2 * s)
+
+    current_y = line_top + 20
+    row_gap = 46
+    activations = []
+    rendered_messages = []
+
+    for idx, message in enumerate(messages):
+        frm = participant_map[message["from"]]
+        to = participant_map[message["to"]]
+        label = str(message.get("label", "")).strip()
+        y = message.get("y", current_y)
+        current_y = y + row_gap
+
+        same_participant = frm["id"] == to["id"]
+        msg_type = message.get("type", "call")
+        label_font = plotter._get_font(16 * s)
+
+        if same_participant:
+            x = frm["center_x"]
+            loop_w = 90
+            loop_h = 42
+            points = [
+                (x * s, y * s),
+                ((x + loop_w) * s, y * s),
+                ((x + loop_w) * s, (y + loop_h) * s),
+                (x * s, (y + loop_h) * s),
+            ]
+            for i in range(len(points) - 1):
+                draw.line([points[i], points[i + 1]], fill=line_color, width=2 * s)
+            draw.line([points[-1], ((x + 14) * s, (y + loop_h) * s)], fill=line_color, width=2 * s)
+            draw.polygon(
+                [((x + 2) * s, (y + loop_h) * s), ((x + 14) * s, (y + loop_h - 6) * s), ((x + 14) * s, (y + loop_h + 6) * s)],
+                fill=line_color,
+            )
+            bbox = draw.textbbox((0, 0), label, font=label_font)
+            draw.text((((x + loop_w / 2) * s) - (bbox[2] - bbox[0]) / 2, (y - 26) * s), label, fill=text_color, font=label_font)
+            rendered_messages.append((frm["id"], y, y + loop_h, msg_type))
+            continue
+
+        start_x = frm["center_x"]
+        end_x = to["center_x"]
+        left_x = min(start_x, end_x)
+        right_x = max(start_x, end_x)
+        arrow_dir = 1 if end_x >= start_x else -1
+
+        draw.line([start_x * s, y * s, end_x * s, y * s], fill=line_color, width=2 * s)
+        ah = 12 * s
+        aw = 7 * s
+        arrow_tip = (end_x * s, y * s)
+        arrow_base = ((end_x - arrow_dir * (ah / s)) * s, y * s)
+        draw.polygon(
+            [
+                arrow_tip,
+                (arrow_base[0], arrow_base[1] - aw),
+                (arrow_base[0], arrow_base[1] + aw),
+            ],
+            fill=line_color,
+        )
+
+        if label:
+            max_label_w = max(80, int((right_x - left_x) * s - 24 * s))
+            lines = _wrap_text_lines(draw, label, label_font, max_label_w)
+            line_h = _line_metrics(draw, label_font)
+            total_h = len(lines) * line_h
+            start_ty = (y - 12) * s - total_h
+            for line_idx, line in enumerate(lines):
+                bbox = draw.textbbox((0, 0), line, font=label_font)
+                tx = ((left_x + right_x) / 2) * s - (bbox[2] - bbox[0]) / 2
+                ty = start_ty + line_idx * line_h
+                draw.text((tx, ty), line, fill=text_color, font=label_font)
+
+        rendered_messages.append((frm["id"], y - 4, y + 4, msg_type))
+        if msg_type == "call":
+            rendered_messages.append((to["id"], y + 4, y + 42, "activation"))
+            activations.append({"participant": to["id"], "y": y + 4, "h": 38})
+
+    activation_w = 16
+    for item in activations:
+        participant = participant_map[item["participant"]]
+        x1 = (participant["center_x"] - activation_w / 2) * s
+        x2 = (participant["center_x"] + activation_w / 2) * s
+        y1 = item["y"] * s
+        y2 = (item["y"] + item["h"]) * s
+        draw.rectangle([x1, y1, x2, y2], fill="#FFFFFF", outline=line_color, width=2 * s)
+
+    plotter.save(filename)
+
+    cells = []
+    for participant in participants:
+        pid = participant["id"]
+        px = participant["x"]
+        cx = participant["center_x"]
+        cells.append(
+            f'<mxCell id="{pid}" value="{_mx_escape(participant["name"])}" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#444444;fillColor=#FFFFFF;align=center;verticalAlign=middle;fontSize=20;fontColor=#111111;fontFamily=Microsoft YaHei;" vertex="1" parent="1"><mxGeometry x="{int(px)}" y="{top_margin}" width="{header_w}" height="{header_h}" as="geometry"/></mxCell>'
+        )
+        cells.append(
+            f'<mxCell id="{pid}_life" value="" style="endArrow=none;dashed=1;html=1;strokeWidth=2;strokeColor=#444444;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="{int(cx)}" y="{line_top}" as="sourcePoint"/><mxPoint x="{int(cx)}" y="{int(line_bottom)}" as="targetPoint"/></mxGeometry></mxCell>'
+        )
+
+    for idx, message in enumerate(messages, start=1):
+        frm = participant_map[message["from"]]
+        to = participant_map[message["to"]]
+        label = str(message.get("label", "")).strip()
+        y = int(message.get("y", line_top + 20 + (idx - 1) * row_gap))
+        msg_type = message.get("type", "call")
+
+        if frm["id"] == to["id"]:
+            loop_x = int(frm["center_x"])
+            cells.append(
+                f'<mxCell id="msg_{idx}" value="{_mx_escape(label)}" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#444444;endArrow=block;endFill=1;fontSize=16;fontColor=#111111;fontFamily=Microsoft YaHei;loopDirection=0;" edge="1" parent="1" source="{frm["id"]}" target="{to["id"]}"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="{loop_x + 90}" y="{y}"/><mxPoint x="{loop_x + 90}" y="{y + 42}"/></Array></mxGeometry></mxCell>'
+            )
+            continue
+
+        cells.append(
+            f'<mxCell id="msg_{idx}" value="{_mx_escape(label)}" style="endArrow=block;endFill=1;html=1;strokeWidth=2;strokeColor=#444444;fontSize=16;fontColor=#111111;fontFamily=Microsoft YaHei;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="{int(frm["center_x"])}" y="{y}" as="sourcePoint"/><mxPoint x="{int(to["center_x"])}" y="{y}" as="targetPoint"/></mxGeometry></mxCell>'
+        )
+        if msg_type == "call":
+            act_x = int(to["center_x"] - activation_w / 2)
+            cells.append(
+                f'<mxCell id="act_{idx}" value="" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#444444;fillColor=#FFFFFF;" vertex="1" parent="1"><mxGeometry x="{act_x}" y="{y + 4}" width="{activation_w}" height="38" as="geometry"/></mxCell>'
+            )
+
+    _write_drawio(filename, "SequenceDiagram", cells, page_width=max(1600, width), page_height=max(900, height))
